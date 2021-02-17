@@ -1,7 +1,7 @@
 import pytest
 from pytest import fixture
 
-from controler.generate_path import PathGenerator, Curve
+from controller.generate_path import PathGenerator, Curve
 
 
 class MockModel:
