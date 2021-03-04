@@ -32,8 +32,6 @@ async def start(request):
     # connect to drone
     # init other modules and start their main loops
     # and save them in global scope i guess
-    print(request)
-    print(request.json)
     global controller
     if controller is not None:
         raise exceptions.InvalidUsage("Drone is already in flight!")
