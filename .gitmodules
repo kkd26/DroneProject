@@ -1,6 +1,6 @@
 [submodule "ros"]
 	path = ros
-	url = https://github.com/mbyzhang/DroneProjectROS
+	url = git@github.com:mbyzhang/DroneProjectROS.git
 [submodule "web-app"]
 	path = web-app
 	url = git@github.com:kkd26/DroneProjectWebApp.git
