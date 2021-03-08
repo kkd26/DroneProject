@@ -58,16 +58,16 @@ class GPSListener(olympe.EventListener):
         return (lat_pos, long_pos, alt_pos)
     
 
-
-drone = olympe.Drone(DRONE_IP)
-with GPSListener(drone) as gps_listener:
-    drone.connect()
-    drone(
-        FlyingStateChanged(state="hovering")
-        | (TakeOff() & FlyingStateChanged(state="hovering"))
-    ).wait()
-    drone(moveBy(10,0,0,0)).wait()
-    drone(Landing()).wait()
-    drone(FlyingStateChanged(state="landed")).wait()
-    drone.disconnect()
+if __name__ == '__main__':
+    drone = olympe.Drone(DRONE_IP)
+    with GPSListener(drone) as gps_listener:
+        drone.connect()
+        drone(
+            FlyingStateChanged(state="hovering")
+            | (TakeOff() & FlyingStateChanged(state="hovering"))
+        ).wait()
+        drone(moveBy(10,0,0,0)).wait()
+        drone(Landing()).wait()
+        drone(FlyingStateChanged(state="landed")).wait()
+        drone.disconnect()
 
