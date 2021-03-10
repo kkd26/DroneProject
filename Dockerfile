@@ -5,10 +5,11 @@ RUN echo "yaml file:///etc/ros/rosdep/rules/alpha.yaml" > /etc/ros/rosdep/source
     printf "python3-janus:\n    ubuntu: [python3-janus]\n" > /etc/ros/rosdep/rules/alpha.yaml && \
     rosdep update
 
-ADD src /opt/alpha_ws/src
+ADD ros /opt/alpha_ws/src
 
 RUN cd /opt/alpha_ws && \
-    rosdep install --from-paths src --ignore-src -r -y
+    rosdep install --from-paths src --ignore-src -r -y && \
+    apt clean
 
 RUN cd /opt/alpha_ws && \
     /ros_entrypoint.sh catkin_make
