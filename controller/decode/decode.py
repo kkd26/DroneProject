@@ -50,47 +50,51 @@ class SingleMove:
         return
 
     def __call__(self, drone: olympe.Drone):
-        print(f"Executing Instruction Started: {self.__func}, {self.__kwargs}\n", end="")
+        dbgprint(f"Executing Instruction Started: {self.__func}, {self.__kwargs}\n", end="")
 
         if not self.__blocking:
             drone(self.__func(**self.__kwargs))
             if self.__time > 0:
                 time.sleep(self.__time * (1 / REAL_TIME_FACTOR))
         else:
-            print(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
+            dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
 
             if self.__time > 0:
                 assert drone(self.__func(**self.__kwargs)).wait().success()
                 time.sleep(self.__time * (1 / REAL_TIME_FACTOR))
 
             else:
-                print("\tCommencing move\n", end="")
+                dbgprint("\tCommencing move\n", end="")
                 assert drone(self.__func(**self.__kwargs)).wait().success()
 
-                print("\tWaiting for move to end:\n", end="")
+                dbgprint("\tWaiting for move to end:\n", end="")
 
                 elapsed = 1
                 while not drone(FlyingStateChanged(state="hovering")).wait().success():
-                    print(f"waiting; elapsed={elapsed}\tflying state: {drone.get_state(FlyingStateChanged)['state']}\n",
+                    dbgprint(f"waiting; elapsed={elapsed}\tflying state: {drone.get_state(FlyingStateChanged)['state']}\n",
                           end="")
                     elapsed += 1
 
-                print("\tDone\n", end="")
+                dbgprint("\tDone\n", end="")
 
-        print(f"Executing Instruction Ended: {self.__func}, {self.__kwargs}\n", end="")
+        dbgprint(f"Executing Instruction Ended: {self.__func}, {self.__kwargs}\n", end="")
         return
 
 
 class Decoder:
-    def __init__(self, drone):
+    def __init__(self, drone, *, use_offset: bool = False):
         self.__drone = drone
+        self.__use_offset = use_offset
         self.__interrupt = threading.Event()
         self.__flush = threading.Event()
+        self.__queue = queue.Queue()
+        self.__terminate = threading.Event()
         self.__sample_rate = 4.
-        self.__speed = 5.
+        self.__speed = 2.
 
         self.__interrupt.clear()
         self.__flush.clear()
+        self.__terminate.clear()
         return
 
     def interrupt_and_flush(self):
@@ -100,6 +104,10 @@ class Decoder:
 
     def interrupt(self):
         self.__interrupt.set()
+        return
+
+    def enqueue(self, curve: Curve):
+        self.__queue.put(curve)
         return
 
     def __move_to_start(self, *, position=None, offset=None):
@@ -120,9 +128,9 @@ class Decoder:
 
         elif offset is not None:
             move = SingleMove(command=extended_move_by,
-                              d_x=10,
-                              d_y=0,
-                              d_z=0,
+                              d_x=offset[0],
+                              d_y=-offset[1],
+                              d_z=offset[2],
                               d_psi=0,
                               max_horizontal_speed=8,
                               max_vertical_speed=4,
@@ -135,11 +143,11 @@ class Decoder:
         return
 
     def __fetch_curve(self):
-        # TODO: fetch the curve from alex's code
-        # (maybe add a curve source as a member variable for Decode)
-
-        # The below code is temporary:
-        return Curve(np.array([np.array([10, 2, 0]), np.array([10, 2, 10]), np.array([0, 2, 10])]))
+        try:
+            return self.__queue.get_nowait()
+        except queue.Empty:
+            self.__terminate.set()
+            return None
 
     def main(self):
         mc = MovementController(self.__drone)
@@ -149,18 +157,16 @@ class Decoder:
         curve_time_increment = self.__speed / (curve.scale * self.__sample_rate)
         orientation = 0.
 
-        # TEMP:
-        # self.__move_to_start(offset=np.array([0, 10, 0]))
-
-        # self.__move_to_start(position=curve.get_point_on_curve(0))
+        if self.__use_offset:
+            self.__move_to_start(offset=curve.get_point_on_curve(0.))
+        else:
+            self.__move_to_start(position=curve.get_point_on_curve(0.))
         next_pos = curve.get_point_on_curve(0)
 
-        loop = True
         curve_fetch = False
-        preserve_time = False
         mc.start()
 
-        while loop:
+        while not self.__terminate.is_set():
             # Update current position, etc
             curve_time += curve_time_increment
             current_pos = next_pos
@@ -173,28 +179,28 @@ class Decoder:
                 curve_fetch = True
                 self.__interrupt.clear()
 
-            if math.isclose(curve_time, 1., rel_tol=1e-7, abs_tol=1e-9):
+            if np.isclose(curve_time, 1., rtol=1e-7, atol=1e-9):
                 curve_time = 1.
             elif curve_time > 1.:
                 curve_fetch = True
-                preserve_time = True
 
             if curve_fetch:
-                break  # Temp
-
                 curve = self.__fetch_curve()
+
+                if self.__terminate.is_set():
+                    break
+
                 curve_time = 0.
                 curve_time_increment = self.__speed / (curve.scale * self.__sample_rate)
-
-                if preserve_time:
-                    curve_time += curve_time_increment
-                    preserve_time = False
-
+                curve_time += curve_time_increment
                 curve_fetch = False
 
             if self.__flush.is_set():
                 mc.suspend()
-                self.__move_to_start(position=curve.get_point_on_curve(0.))
+                if self.__use_offset:
+                    self.__move_to_start(offset=curve.get_point_on_curve(0.))
+                else:
+                    self.__move_to_start(position=curve.get_point_on_curve(0.))
                 self.__flush.clear()
                 mc.resume()
 
@@ -204,7 +210,7 @@ class Decoder:
             next_pos = curve.get_point_on_curve(curve_time)
 
             displacement = get_displacement_from_gps(current_pos, next_pos)
-            print(f"disp:{displacement}, start:{current_pos}, end:{next_pos}\n", end="")
+            dbgprint(f"disp:{displacement}, start:{current_pos}, end:{next_pos}\n", end="")
 
             distance = np.linalg.norm(displacement)
             heading = (lambda x: x / np.linalg.norm(x))(displacement)
@@ -214,17 +220,16 @@ class Decoder:
             relative_heading = get_realigned_components(orientation + (rotation / 2.), heading)
 
             mc.enqueue_move(MovementControllerInstr(relative_tilts=relative_heading,
-                                                    rotation=rotation,  # TEMP
+                                                    rotation=rotation,
                                                     velocity=heading * self.__speed,
                                                     absolute_direction=heading,
-                                                    distance=distance,
-                                                    endpoint=next_pos))
+                                                    distance=distance * 3))
 
         mc.join()
         return
 
 
-def main():
+def decode_main():
     drone = olympe.Drone(DRONE_IP)
     drone.connect()
 
@@ -235,7 +240,7 @@ def main():
         drone.disconnect()
         return
 
-    print(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
+    dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
     time.sleep(5)
 
     """ DO STUFF HERE """
@@ -246,7 +251,7 @@ def main():
     """ END DO STUFF """
 
     time.sleep(5)
-    print(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
+    dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
 
     assert drone(Landing(_timeout=RTF_COMPENSATED_TIMEOUT)).wait().success()
     drone.disconnect()
@@ -254,4 +259,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    decode_main()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import queue
 import threading
 import time
@@ -14,41 +13,15 @@ from olympe.messages.ardrone3.PilotingState import FlyingStateChanged, SpeedChan
 from common import *
 
 
-HIGH_COMPENSATION_THRESHOLD = True  # Change to False for production
-
-
 class MovementControllerInstr:
     def __init__(self, relative_tilts: np.ndarray, rotation: float, velocity: np.ndarray,
-                 absolute_direction: np.ndarray, distance: float, endpoint: np.ndarray):
+                 absolute_direction: np.ndarray, distance: float):
         self.drone_tilts = relative_tilts  # (unit vector)
         self.planar_rotation = rotation
         self.target_velocity = velocity  # (relative to the normal axes)
         self.abs_speed_direction = absolute_direction  # (unit vector or zero)
         self.distance = distance
-        self.target_location = endpoint
         return
-
-
-def generate_compensation_vector(speeds: np.ndarray, target: np.ndarray = np.array([0., 0., 0.])) -> np.ndarray:
-    output = np.array([0., 0., 0.])
-
-    for i in (0, 2):
-        if math.isclose(target[i], 0.):
-            if abs(speeds[i]) < 0.01:
-                output[i] = 0.
-            else:
-                if speeds[i] > 0.:
-                    output[i] = clamp(-(speeds[i] * 50), -200., 200.)
-                else:
-                    output[i] = clamp(speeds[i] * 50, -200., 200.)
-        else:
-            percent_speed = 100 * (speeds[i] / target[i])
-            output[i] = clamp(100 - percent_speed, -200., 200.)
-
-    output /= 10
-    output_helper = np.array([abs(e) for e in output])
-
-    return output * output_helper
 
 
 class MovementController(threading.Thread):
@@ -62,7 +35,6 @@ class MovementController(threading.Thread):
         # term = 0, awake = 1: resume normal execution
         # term = 1, awake = 0: [avoid this state]
         # term = 1, awake = 1: unblock if necessary and terminate thread after completing current instruction
-        # self.flush
         self.__terminate = threading.Event()
         self.__awake = threading.Event()
 
@@ -72,16 +44,15 @@ class MovementController(threading.Thread):
         self.__terminate.clear()
         return
 
-    SLEEP_TIME = 0.05  # TODO: change back to 0.05 for production usage
+    SLEEP_TIME = 0.05
 
     def run(self):
         self.__awake.set()
         running = True
-        horizontal_tilt_multiplier = 50
-        vertical_tilt_multiplier = 100
         current_orientation = 0  # (facing positive x)
         iteration_start = time.time_ns()
         idle_count = 0
+        relative_tilts = np.zeros(3)
 
         while running:
             while self.__awake.is_set() and not self.__terminate.is_set():
@@ -89,23 +60,20 @@ class MovementController(threading.Thread):
 
                 if self.__cancel_instruction.is_set() or self.__moves.empty():
                     idle_count += 1
-                    if idle_count > 100:
+                    if idle_count == 50:
+                        relative_tilts = np.zeros(3)
+                    if idle_count == 100:
                         self.__idle.set()
 
                     # update velocity and location
                     velocity = self.__drone.get_state(SpeedChanged)
-                    velocity = np.array([velocity['speedX'], -velocity['speedZ'], velocity['speedY']])
-                    gps_loc = self.__drone.get_state(PositionChanged)
-
-                    # realign components
-                    actual_velocity = get_realigned_components(current_orientation, velocity)
+                    velocity = np.array([velocity['speedY'], -velocity['speedZ'], -velocity['speedX']])
 
                     # adjust compensation tilt
-                    compensation = generate_compensation_vector(speeds=actual_velocity)
+                    compensation = get_compensation_vector(speeds=velocity)
 
                     # send pcmd command
-                    print(f"idle... , speed:{velocity}, compensation:{compensation}, "
-                          f"pos:{[gps_loc['latitude'], gps_loc['longitude'], gps_loc['altitude']]}\n", end="")
+                    dbgprint(f"idle... , speed:{velocity}, compensation:{compensation}\n", end="")
 
                     self.__drone(PCMD(flag=1,
                                       roll=clamp(int(compensation[2]), -100, 100),
@@ -120,16 +88,25 @@ class MovementController(threading.Thread):
                     iteration_start = time.time_ns()
 
                 else:
-                    print("starting move\n", end="")
+                    dbgprint("starting move\n", end="")
                     idle_count = 0
                     self.__idle.clear()
 
+                    previous_tilt = relative_tilts
+
                     # fetch new instruction
                     current_instr = self.__moves.get_nowait()
-                    target_velocity = current_instr.target_velocity
+                    target_velocity = get_realigned_components(current_orientation, current_instr.target_velocity)
+                    target_speed = np.linalg.norm(target_velocity)
                     relative_tilts = current_instr.drone_tilts
+
+                    horizontal_tilt_multiplier = get_horizontal_speed_estimate(target_speed)
                     reached_target = False
                     distance_travelled = 0.
+                    count = 0
+
+                    # compensate for previous move
+                    relative_tilts_actual = relative_tilts - previous_tilt
 
                     # send PCMD messages until move has been completed
                     while not reached_target:
@@ -140,31 +117,34 @@ class MovementController(threading.Thread):
                         
                         # update velocity and location
                         velocity = self.__drone.get_state(SpeedChanged)
-                        velocity = np.array([velocity['speedX'], -velocity['speedZ'], velocity['speedY']])
-                        gps_loc = self.__drone.get_state(PositionChanged)
-                        distance_travelled += np.linalg.norm(np.dot(velocity, current_instr.abs_speed_direction)) / 20.
+                        velocity = np.array([velocity['speedY'], -velocity['speedZ'], -velocity['speedX']])
+
+                        # update distance travelled
+                        relative_velocities = get_realigned_components_from_axis(relative_tilts, velocity)
+                        distance_travelled += relative_velocities[0] * MovementController.SLEEP_TIME
+
+                        # revert relative_tilts_actual
+                        if count == 20:
+                            dbgprint("reverted...\n", end="")
+                            relative_tilts_actual = relative_tilts
 
                         # heading = get heading somehow
                         heading = 0
                         average_rot = 0
 
-                        # realign components
-                        actual_velocity = get_realigned_components(current_orientation, velocity)
-
                         # compensate
-                        compensation = generate_compensation_vector(speeds=actual_velocity, target=target_velocity)
+                        compensation = get_compensation_vector(speeds=velocity, target_speeds=target_velocity)
 
                         # send pcmd command
-                        print(f"distance:{distance_travelled}, speed:{actual_velocity}, target:{target_velocity}, " 
-                              f"compensation:{compensation},  "
-                              f"pos:{[gps_loc['latitude'], gps_loc['longitude'], gps_loc['altitude']]}\n", end="")
+                        dbgprint(f"distance:{distance_travelled}, speed:{velocity}, target:{target_velocity}, " 
+                                 f"compensation:{compensation}\n", end="")
 
                         self.__drone(PCMD(
                             flag=1,
-                            roll=clamp(int((horizontal_tilt_multiplier * relative_tilts[2]) + compensation[2]), -100, 100),
-                            pitch=clamp(int((horizontal_tilt_multiplier * relative_tilts[0]) + compensation[0]), -100, 100),
+                            roll=clamp(int((horizontal_tilt_multiplier * relative_tilts_actual[2]) + compensation[2]), -100, 100),
+                            pitch=clamp(int((horizontal_tilt_multiplier * relative_tilts_actual[0]) + compensation[0]), -100, 100),
                             yaw=0,
-                            gaz=-clamp(int((horizontal_tilt_multiplier * relative_tilts[1]) + compensation[1]), -100, 100),
+                            gaz=-clamp(int((horizontal_tilt_multiplier * relative_tilts_actual[1]) + compensation[1]), -100, 100),
                             timestampAndSeqNum=0)
                         )
 
@@ -174,14 +154,16 @@ class MovementController(threading.Thread):
                         iteration_start = time.time_ns()
 
                         # Check if destination reached
-                        if math.isclose(distance_travelled, current_instr.distance) \
+                        if np.isclose(distance_travelled, current_instr.distance) \
                                 or distance_travelled > current_instr.distance:
-                            print(f"distance")
+                            dbgprint(f"distance")
                             reached_target = True
                             distance_travelled = 0.
 
+                        count += 1
+
                     self.__moves.task_done()
-                    print("move done\n", end="")
+                    dbgprint("move done\n", end="")
 
             self.__idle.set()
 
