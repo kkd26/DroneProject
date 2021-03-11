@@ -6,6 +6,7 @@ from olympe.messages.ardrone3.PilotingState import (
     FlyingStateChanged,
     SpeedChanged,
 )
+from olympe.messages.ardrone3.GPSSettings import SendControllerGPS
 
 
 DRONE_IP = "10.202.0.1"
@@ -27,40 +28,49 @@ class Model:
         self.user = user
 
 
-class GPSListener(olympe.EventListener):
+class FlightListener(olympe.EventListener):
 
-    models = []
-    user_loc = None
-    user_speed = None
+    # model is updated every time there is a change so most recent stats used
+    model = None
 
-    # currently waiting for drone to send event messages, results in more velocity than location
-    # -> find method of querying location and position periodically to generate models
-    
+    def __init__(self, drone, model):
+        self.model = model
+        super().__init__(self, drone)
     
     @olympe.listen_event(PositionChanged())
     def onPositionChanged(self, event, scheduler):
-        f = open("gps.txt", "a")
-        f.write("latitude = {latitude} longitude = {longitude}\n".format(**event.args))
-        f.close()
-    # query and update user location here too - controller_gps sends command message to drone   
+        model.drone.gps_loc = (event.latitude, event.longitude, event.altitude)
     
+
     @olympe.listen_event(SpeedChanged())
     def onSpeedChanged(self, event, scheduler):
-        f = open("velocity.txt", "a")
-        f.write("latN: {speedX}  longE: {speedY}  altD: {speedZ}\n".format(**event.args))
-        f.close()
-    # query and update user speed here too - controller_gps sends command message to drone
+        model.drone.velocity = (event.speedX, event.speedY, event.speedZ)
+
+    # user position gps and speed data from app - done in ros integration
 
     def predictFutureUserLoc(time):
-        lat_pos = user_loc[0] + time * user_speed[0]
-        long_pos = user_loc[1] + time * user_speed[1]
-        alt_pos = user_loc[2] - time * user_speed[2]  # positive speed downwards
+        lat_pos = model.user.gps_loc[0] + time * model.user.velocity[0]
+        long_pos = model.user.gps_loc[1] + time * model.user.velocity[1]
+        alt_pos = model.user.gps_loc[2] - time * model.user.velocity[2]  # positive speed downwards
+        return (lat_pos, long_pos, alt_pos)
+
+    def predictFutureDroneLoc(time):
+        lat_pos = model.drone.gps_loc[0] + time * model.drone.velocity[0]
+        long_pos = model.drone.gps_loc[1] + time * model.drone.velocity[1]
+        alt_pos = model.drone.gps_loc[2] - time * model.drone.velocity[2]  # positive speed downwards
         return (lat_pos, long_pos, alt_pos)
     
 
+
 if __name__ == '__main__':
     drone = olympe.Drone(DRONE_IP)
-    with GPSListener(drone) as gps_listener:
+    # model starts initialised to 0 here, updated as soon as gps data of drone available
+    ent_drone = Entity((0,0,0), (0,0,0))
+    ent_user = Entity((0,0,0), (0,0,0))
+    model = Model(ent_drone, ent_user)
+    # possible implementation for testing purposes
+    with FlightListener(drone, model) as flight_listener:
+        # flight_listener.model will give access to the latest coordinates and speed of user and drone
         drone.connect()
         drone(
             FlyingStateChanged(state="hovering")
@@ -68,6 +78,8 @@ if __name__ == '__main__':
         ).wait()
         drone(moveBy(10,0,0,0)).wait()
         drone(Landing()).wait()
+        drone(FlyingStateChanged(state="landed")).wait()
+        drone.disconnect()
         drone(FlyingStateChanged(state="landed")).wait()
         drone.disconnect()
 
