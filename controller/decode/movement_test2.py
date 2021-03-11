@@ -14,16 +14,13 @@ from curve import Curve
 from decode import *
 
 
-""" TEST CODE: """
-DRONE_IP = "192.168.56.101"
-
-
 def main():
+    DRONE_IP = "192.168.56.101"
     drone = olympe.Drone(DRONE_IP)
     drone.connect()
 
-    if not drone(TakeOff(_timeout=RTF_COMPENSATED_TIMEOUT)
-                 >> FlyingStateChanged(state="hovering", _timeout=3 * RTF_COMPENSATED_TIMEOUT)
+    if not drone(TakeOff()
+                 >> FlyingStateChanged(state="hovering", _timeout=30)
                  ).wait().success():
         print("\nERROR: Could not take off\n", file=sys.stderr)
         drone.disconnect()

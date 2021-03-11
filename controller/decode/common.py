@@ -86,6 +86,17 @@ def get_horizontal_speed_estimate(speed: float) -> int:
     return -81.01381 + 85.35033 * np.power(np.e, 0.08714212 * speed)
 
 
+def get_displacement(start: np.ndarray, end: np.ndarray, *, from_gps) -> np.ndarray:
+    # Gets the displacement between two points, which may be specified as gps coords
+    if from_gps:
+        d_lat = ((end[0] - start[0]) / 360.) * np.pi * 6.371e6 * 2.
+        ave_lat = (start[0] + end[0]) / 2.
+        d_long = ((end[2] - start[2]) / 360.) * np.pi * (np.cos(ave_lat) * 6.371e6 * 2.)
+        return np.array([d_lat, 0, d_long])
+    else:
+        return end - start
+
+
 def dbgprint(*args, **kwargs):
     if DECODE_DEBUG:
         print(*args, **kwargs)

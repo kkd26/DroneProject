@@ -17,26 +17,11 @@ from curve import Curve
 from common import *
 from movement_controller import *
 
-""" TEST CODE: """
-DRONE_IP = "192.168.56.101"
-# DRONE_IP = "192.168.122.107"
-REAL_TIME_FACTOR = 0.4  # TODO: change back to 1 for production
-RTF_COMPENSATED_TIMEOUT = 50  # TODO: change back to 10 for production
-""" END TEST CODE: """
-
-def get_displacement_from_gps(start: np.ndarray, end: np.ndarray) -> np.ndarray:
-    # TODO: calculate the displacement between start and end
-
-    return end - start  # TODO: remove this later
-
-
-def get_angle_from_gps(start: np.ndarray, end: np.ndarray) -> np.ndarray:
-    # TODO: calculate the displacement between start and end
-
-    return np.zeros(3)  # TODO: remove this later
-
 
 class SingleMove:
+    REAL_TIME_FACTOR = 0.4
+    RTF_TIMEOUT = 50
+
     def __init__(self, command, blocking: bool = True, duration: float = -1, **kwargs):
         self.__func = command
         self.__kwargs = kwargs
@@ -44,9 +29,9 @@ class SingleMove:
         self.__blocking = blocking
 
         if "_timeout" in self.__kwargs:
-            self.__kwargs["_timeout"] *= int(1 / REAL_TIME_FACTOR)
+            self.__kwargs["_timeout"] *= int(1 / SingleMove.REAL_TIME_FACTOR)
         else:
-            self.__kwargs["_timeout"] = RTF_COMPENSATED_TIMEOUT
+            self.__kwargs["_timeout"] = SingleMove.RTF_TIMEOUT
         return
 
     def __call__(self, drone: olympe.Drone):
@@ -55,13 +40,13 @@ class SingleMove:
         if not self.__blocking:
             drone(self.__func(**self.__kwargs))
             if self.__time > 0:
-                time.sleep(self.__time * (1 / REAL_TIME_FACTOR))
+                time.sleep(self.__time * (1 / SingleMove.REAL_TIME_FACTOR))
         else:
             dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
 
             if self.__time > 0:
                 assert drone(self.__func(**self.__kwargs)).wait().success()
-                time.sleep(self.__time * (1 / REAL_TIME_FACTOR))
+                time.sleep(self.__time * (1 / SingleMove.REAL_TIME_FACTOR))
 
             else:
                 dbgprint("\tCommencing move\n", end="")
@@ -209,7 +194,7 @@ class Decoder:
             # get next points and segments on curve
             next_pos = curve.get_point_on_curve(curve_time)
 
-            displacement = get_displacement_from_gps(current_pos, next_pos)
+            displacement = get_displacement(current_pos, next_pos, from_gps=self.__use_offset)
             dbgprint(f"disp:{displacement}, start:{current_pos}, end:{next_pos}\n", end="")
 
             distance = np.linalg.norm(displacement)
@@ -228,35 +213,3 @@ class Decoder:
         mc.join()
         return
 
-
-def decode_main():
-    drone = olympe.Drone(DRONE_IP)
-    drone.connect()
-
-    if not drone(TakeOff(_timeout=RTF_COMPENSATED_TIMEOUT)
-                 >> FlyingStateChanged(state="hovering", _timeout=3 * RTF_COMPENSATED_TIMEOUT)
-                 ).wait().success():
-        print("\nERROR: Could not take off\n", file=sys.stderr)
-        drone.disconnect()
-        return
-
-    dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
-    time.sleep(5)
-
-    """ DO STUFF HERE """
-
-    d = Decoder(drone)
-    d.main()
-
-    """ END DO STUFF """
-
-    time.sleep(5)
-    dbgprint(f"flying state: {drone.get_state(FlyingStateChanged)['state']}\n", end="")
-
-    assert drone(Landing(_timeout=RTF_COMPENSATED_TIMEOUT)).wait().success()
-    drone.disconnect()
-    return
-
-
-if __name__ == "__main__":
-    decode_main()

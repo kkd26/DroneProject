@@ -10,15 +10,13 @@ from olympe.messages.ardrone3.PilotingState import FlyingStateChanged
 
 from movement_controller import *
 
-""" TEST CODE: """
-DRONE_IP = "192.168.56.101"
-
 
 def to_unit(x: np.ndarray):
     return x / np.linalg.norm(x)
 
 
 def main():
+    DRONE_IP = "192.168.56.101"
     drone = olympe.Drone(DRONE_IP)
     drone.connect()
 
@@ -38,35 +36,17 @@ def main():
     mc.start()
     print("move queueing started\n", end="")
 
-    # for i in range(0, 20):
-    #
-    #     drone(PCMD(flag=0,
-    #                roll=0,
-    #                pitch=0,
-    #                yaw=100,
-    #                gaz=0,
-    #                timestampAndSeqNum=0))
-    #
-    #     time.sleep(0.05)
-    #
-    # drone(PCMD(flag=0,
-    #            roll=0,
-    #            pitch=0,
-    #            yaw=0,
-    #            gaz=0,
-    #            timestampAndSeqNum=0))
+    mc.enqueue_move(MovementControllerInstr(relative_tilts=np.array([1., 0., 0.]),
+                                            rotation=0.,
+                                            velocity=np.array([2., 0., 0.]),
+                                            absolute_direction=np.array([1, 0., 0.]),
+                                            distance=10.))
 
-    # mc.enqueue_move(MovementControllerInstr(relative_tilts=np.array([1., 0., 0.]),
-    #                                         rotation=0.,
-    #                                         velocity=np.array([2., 0., 0.]),
-    #                                         absolute_direction=np.array([1, 0., 0.]),
-    #                                         distance=10.))
-    #
-    # mc.enqueue_move(MovementControllerInstr(relative_tilts=np.array([0., 0., 1.]),
-    #                                         rotation=0.,
-    #                                         velocity=np.array([0., 0., 2.]),
-    #                                         absolute_direction=np.array([0., 0., 1.]),
-    #                                         distance=10.))
+    mc.enqueue_move(MovementControllerInstr(relative_tilts=np.array([0., 0., 1.]),
+                                            rotation=0.,
+                                            velocity=np.array([0., 0., 2.]),
+                                            absolute_direction=np.array([0., 0., 1.]),
+                                            distance=10.))
 
     mc.enqueue_move(MovementControllerInstr(relative_tilts=to_unit(np.array([1., 0., 1.])),
                                             rotation=0.,
