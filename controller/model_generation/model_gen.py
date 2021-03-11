@@ -62,21 +62,24 @@ class FlightListener(olympe.EventListener):
     
 
 
-drone = olympe.Drone(DRONE_IP)
-ent_drone = Entity((0,0,0), (0,0,0))
-ent_user = Entity((0,0,0), (0,0,0))
-model = Model(ent_drone, ent_user)
-
-# possible implementation for testing purposes
-with FlightListener(drone, model) as flight_listener:
-    # flight_listener.model will give access to the latest coordinates and speed of user and drone
-    drone.connect()
-    drone(
-        FlyingStateChanged(state="hovering")
-        | (TakeOff() & FlyingStateChanged(state="hovering"))
-    ).wait()
-    drone(moveBy(10,0,0,0)).wait()
-    drone(Landing()).wait()
-    drone(FlyingStateChanged(state="landed")).wait()
-    drone.disconnect()
+if __name__ == '__main__':
+    drone = olympe.Drone(DRONE_IP)
+    # model starts initialised to 0 here, updated as soon as gps data of drone available
+    ent_drone = Entity((0,0,0), (0,0,0))
+    ent_user = Entity((0,0,0), (0,0,0))
+    model = Model(ent_drone, ent_user)
+    # possible implementation for testing purposes
+    with FlightListener(drone, model) as flight_listener:
+        # flight_listener.model will give access to the latest coordinates and speed of user and drone
+        drone.connect()
+        drone(
+            FlyingStateChanged(state="hovering")
+            | (TakeOff() & FlyingStateChanged(state="hovering"))
+        ).wait()
+        drone(moveBy(10,0,0,0)).wait()
+        drone(Landing()).wait()
+        drone(FlyingStateChanged(state="landed")).wait()
+        drone.disconnect()
+        drone(FlyingStateChanged(state="landed")).wait()
+        drone.disconnect()
 

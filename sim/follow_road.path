@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<path name="square_walk">
+  <auto_start>true</auto_start>
+  <delay_start>1.000000</delay_start>
+  <loop>true</loop>
+  <waypoint>
+    <animation>walk</animation>
+    <velocity>1</velocity>
+    <xy>0 0</xy>
+  </waypoint>
+  <waypoint>
+    <animation>run</animation>
+    <velocity>2</velocity>
+    <xy>100 0</xy>
+  </waypoint>
+  <waypoint>
+    <animation>walk</animation>
+    <velocity>1</velocity>
+    <xy>150 50</xy>
+  </waypoint>
+  <waypoint>
+    <animation>run</animation>
+    <velocity>2</velocity>
+    <xy>150 100</xy>
+  </waypoint>
+  <waypoint>
+    <animation>walk</animation>
+    <velocity>1</velocity>
+    <xy>200 100</xy>
+  </waypoint>
+</path>
